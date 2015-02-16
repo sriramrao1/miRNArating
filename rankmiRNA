@@ -1,0 +1,120 @@
+rankmiRNA <- function(bmIndDmr=TRUE, biomarkerone=1.0, biomarkerzero=0.0) {
+        ## Load the "stringr" package if not already loaded
+        list.of.packages <- c("stringr")
+        new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+        if(length(new.packages)) {
+                install.packages(new.packages)
+                library(stringr)
+        }
+        
+        ## Read miRNA data from CSV file
+        CTCdata <- read.csv(".\\data\\circulating microRNAs.csv", header=TRUE, stringsAsFactors=FALSE, na.strings=c("Not Available"));
+        ## Read only the relevant columns
+        CTCdata1 <- subset(CTCdata, select=c(1,2,3,4,5,9));
+        colnames(CTCdata1) <- c("miRNA", "fulldiseasename", "BioMarker", "Disease", "miRNAshort", "Rating");
+        
+        ##Read Disease Mortality data from CSV file
+        mortalitydata <- read.csv(".\\data\\DiseaseMortalityRate.csv", header=TRUE, stringsAsFactors=FALSE, na.strings=c("Not Available"));
+        
+        ##Function to get the Mortality rate based on the data downloaded from CSV file above
+        getmortalityrate <- function(disease){
+                mr <- 0;
+                for(j in 1:nrow(mortalitydata)){
+                        if(disease == mortalitydata$Disease[j]){
+                                mr <- ((mortalitydata$AverageMortalityRate[j])/100);
+                        }
+                }
+                mr;
+        }
+        
+        getOriginalDisease <- function(shortname){
+                diseaselist <- vector();
+                for(k in 1:nrow(CTCdata)){
+                        if((str_extract(CTCdata$mature_miRNA[k], miRNApattern)) == shortname){
+                                diseaselist <- paste(diseaselist, CTCdata$disease[k], sep="|")
+                        }
+                }
+                diseaselist;
+        }
+        
+        getOriginalmiRNA <- function(shortname){
+                miRNAlist <- vector();
+                for(k in 1:nrow(CTCdata)){
+                        if((str_extract(CTCdata$mature_miRNA[k], miRNApattern)) == shortname){
+                                miRNAlist <- paste(miRNAlist, CTCdata$mature_miRNA[k], sep="|")
+                        }
+                }
+                miRNAlist;
+        }
+        
+ 
+        #####variable to store the rating score
+        miRNArating <- vector(mode="numeric", length=nrow(CTCdata1));
+        #####variable to store the miRNA short name
+        miRNAshort1 <- vector(mode="character", length=nrow(CTCdata1));
+        #####variable to store the miRNA name pattern
+        miRNApattern <- "([a-zA-Z]+)-([a-zA-Z]+)-([0-9]+)"
+        
+        ## Get the impact rating for each miRNA
+        for(i in 1:nrow(CTCdata1)){
+                
+                mrvalue <- getmortalityrate(CTCdata1$Disease[i])
+                
+                ## If potential biomarker is independent of the disease mortality rate
+                if(bmIndDmr){
+                        if((CTCdata1$BioMarker[i]) == 1){
+                                miRNArating[i] <- (((CTCdata1$BioMarker[i])*biomarkerone) + mrvalue)       
+                        }
+                        else{
+                                miRNArating[i] <- (((CTCdata1$BioMarker[i])*biomarkerzero) + mrvalue)
+                        }
+                }
+                ## If the miRNA disease mortality rate does not matter if potential biomarker is zero
+                ## In other words if a potential biomarker of 1 means that the miRNA causes the disease  
+                ## and potential biomarker of 0 means that the miRNA does not cause the respective disease. 
+                else{
+                        if((CTCdata1$BioMarker[i]) == 1){
+                                miRNArating[i] <- ((CTCdata1$BioMarker[i])*biomarkerone*mrvalue)       
+                        }
+                        else{
+                                miRNArating[i] <- ((CTCdata1$BioMarker[i])*biomarkerzero*mrvalue)
+                        }        
+                }
+                miRNAshort1[i] <-  str_extract(CTCdata1$miRNA[i], miRNApattern)               
+                #print(miRNArating);
+        }
+        ## Store the rating score and miRNA short name in the data frame
+        CTCdata1$Rating <- miRNArating;
+        CTCdata1$miRNAshort <- miRNAshort1;
+        
+        ## Order the data by miRNA shortname (alphabetical order)
+        r <- order(CTCdata1$miRNAshort);
+        CTCdata1 <- CTCdata1[r, ];
+        write.csv(CTCdata1, file=".\\data\\output.csv")
+        
+        ## Sum the rating values of each unique miRNA
+        v <- by(CTCdata1[ ,6], CTCdata1$miRNAshort, sum, simplify=TRUE);  
+        
+        ## Sort the miRNA by rating in descending order 
+        v <- sort(v, decreasing=TRUE);
+        write.csv(v, file=".\\data\\output1.csv")
+        ## Get the top 94 miRNA by the impact rating (based on biomarker and mortality rate)
+        ##v[1:94];
+        
+        
+        ##populate the Output dataframe with the summarized disease and original miRNA names
+        OutputDF <- read.csv(".\\data\\output1.csv", header=TRUE, stringsAsFactors=FALSE);
+        colnames(OutputDF) <- c("shortmiRNA_name", "Impact_Rating")
+                
+        rnalist <- vector();
+        diseaselist1 <- vector();
+        for(l in (1:nrow(OutputDF))){
+                diseaselist1 <- c(diseaselist1, getOriginalDisease(OutputDF$shortmiRNA_name[l]))
+                rnalist      <- c(rnalist,      getOriginalmiRNA(OutputDF$shortmiRNA_name[l]))
+        }
+        OutputDF <- cbind(OutputDF, diseaselist1);
+        OutputDF <- cbind(OutputDF, rnalist);
+        write.csv(OutputDF, file=".\\data\\output2.csv")
+        ##OutputDF;
+        
+}
